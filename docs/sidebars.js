@@ -218,6 +218,7 @@ module.exports = {
                                 },
                             ],
                         },
+                        'action-server/add-sanic-extensions'
                     ],
                 },
             ],
