@@ -22,6 +22,10 @@ class FlowsList:
         """
         self.underlying_flows = flows
 
+    def is_empty(self) -> bool:
+        """Returns whether the flows list is empty."""
+        return len(self.underlying_flows) == 0
+
     @classmethod
     def from_json(
         cls, flows_configs: Optional[Dict[Text, Dict[Text, Any]]]

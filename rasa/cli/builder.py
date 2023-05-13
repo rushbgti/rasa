@@ -53,9 +53,12 @@ def openai_predict(skill, history):
             description: the description of the flow
             steps:
             - id: "0"   # id of the step
-              action: utter_greet   # if a custom action needs to be triggered
+              intent: greet   # class of the user message
               next: "1"  # id of the next step
-            - id: "1"
+            - id: "1"   # id of the step
+              action: utter_greet   # if a custom action needs to be triggered
+              next: "2"  # id of the next step
+            - id: "2"
               question: age   # if a question needs to be asked
               next:  # if there are multiple next steps, use conditions
               - if: age < 18
@@ -64,6 +67,11 @@ def openai_predict(skill, history):
                 then: "4"
               - else: "5"
             ```
+            A step must always have exatly one of the following properties:
+            - `intent`, if the step describes a user message
+            - `action`, if the step describes an action the bot triggers, e.g. to send a message to the user
+            - `question`, if the step describes a question the bot asks
+
             All steps should be part of the `steps` property of the flow. All
             steps should have a unique `id`. The first step should have the id
             `0`. The last step should not have a `next` property. The `next`
@@ -89,13 +97,14 @@ def openai_predict(skill, history):
     close_prompt = [
         {
             "role": "system",
-            "content": "Start your response with the YAML flow specification. Add any explanations, questions, or comments you have afterwards.",
+            "content": "Start your response with the YAML flow specification. Add any explanations, questions, or comments you have afterwards. Keep your explanations and comments short.",
         }
     ]
 
     # create a completion
     completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        # model="gpt-3.5-turbo",
+        model="gpt-4",
         messages=start_prompt + histroy_as_messages + close_prompt,
     )
 
@@ -155,17 +164,17 @@ def parse_yaml_from_response(response) -> Optional[str]:
     """Parse yaml from a markdown block.
 
     Uses a regular expression to match the ``` code block."""
-    pattern = re.compile(r"```(.*?)```", re.DOTALL)
+    pattern = re.compile(r"```(yaml)?(.*?)```", re.DOTALL)
     match = pattern.search(response)
 
-    return match.group(1) if match else None
+    return match.group(2) if match else None
 
 
 def remove_yaml_from_response(response) -> str:
     """Remove yaml from a markdown block.
 
     Uses a regular expression to match the ``` code block."""
-    pattern = re.compile(r"```(.*?)```", re.DOTALL)
+    pattern = re.compile(r"```(yaml)?(.*?)```", re.DOTALL)
     return pattern.sub("", response)
 
 

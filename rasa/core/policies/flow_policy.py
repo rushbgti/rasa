@@ -12,6 +12,7 @@ from rasa.core.constants import (
 )
 from pypred import Predicate
 from rasa.shared.constants import FLOW_PREFIX
+from rasa.shared.nlu.constants import INTENT_NAME_KEY
 from rasa.shared.core.constants import (
     ACTION_LISTEN_NAME,
     FLOW_STACK_SLOT,
@@ -27,6 +28,7 @@ from rasa.shared.core.flows.flow import (
     FlowStep,
     FlowsList,
     IfFlowLink,
+    IntentFlowStep,
     LinkFlowStep,
     QuestionFlowStep,
     StaticFlowLink,
@@ -139,21 +141,31 @@ class FlowPolicy(Policy):
         """
         if not flows:
             # there are no flows available
+            logger.debug("No flows available. Skipping prediction.")
             predicted_action = None
             predicted_score = 0.0
             events: List[Event] = []
         elif tracker.active_loop:
             # we are in a loop - we don't want to handle flows in this case
+            logger.debug("We are in a loop. Skipping prediction.")
             predicted_action = None
             predicted_score = 0.0
             events = []
         elif current_state_dump := tracker.get_slot(FLOW_STATE_SLOT):
             flow_state = FlowState.from_dict(current_state_dump)
+            logger.debug(f"Found flow state: {flow_state}")
             executor = FlowExecutor(flow_state, flows)
             predicted_action, events = executor.select_next_action(tracker, domain)
             predicted_score = 1.0
-        else:
+        elif new_flow := self.find_startable_flow(tracker, flows):
             # there are flows available, but we are not in a flow
+            # it looks like we can start a flow, so we'll predict the trigger action
+            logger.debug(f"Found startable flow: {new_flow.id}")
+            predicted_action = FLOW_PREFIX + new_flow.id
+            predicted_score = 1.0
+            events = []
+        else:
+            logger.debug("No startable flow found. Skipping prediction.")
             predicted_action = None
             predicted_score = 0.0
             events = []
@@ -161,6 +173,31 @@ class FlowPolicy(Policy):
         result = self._prediction_result(predicted_action, domain, predicted_score)
 
         return self._prediction(result, optional_events=events)
+
+    def find_startable_flow(
+        self, tracker: DialogueStateTracker, flows: FlowsList
+    ) -> Optional[Flow]:
+        """Finds a flow which can be started.
+
+        Args:
+            tracker: The tracker containing the conversation history up to now.
+            domain: The model's domain.
+            flows: The flows to use.
+
+        Returns:
+            The predicted action and the events to run.
+        """
+        for flow in flows.underlying_flows:
+            if not flow.steps:
+                continue
+            first_step = flow.steps[0]
+            if isinstance(
+                first_step, IntentFlowStep
+            ) and first_step.intent == tracker.latest_message.intent.get(
+                INTENT_NAME_KEY
+            ):
+                return flow
+        return None
 
     def _prediction_result(
         self, action_name: Optional[Text], domain: Domain, score: Optional[float] = 1.0
@@ -244,11 +281,10 @@ class FlowExecutor:
         def get_value(
             initial_value: Union[Text, None]
         ) -> Union[Text, float, bool, None]:
-            if initial_value and not isinstance(initial_value, str):
-                raise ValueError("Slot is not a text slot")
-
             if not initial_value:
                 return None
+
+            initial_value = str(initial_value)  # make sure it's a string
 
             if initial_value.lower() in ["true", "false"]:
                 return initial_value.lower() == "true"
@@ -359,7 +395,13 @@ class FlowExecutor:
         if not first_step:
             return (None, [])
 
-        return self._get_action_for_next_step(first_step, tracker, domain)
+        if isinstance(first_step, IntentFlowStep):
+            next_step = self._get_next_step(
+                tracker, domain, first_step, self.flow_state.flow_id
+            )
+            return self._get_action_for_next_step(next_step, tracker, domain)
+        else:
+            return self._get_action_for_next_step(first_step, tracker, domain)
 
     def select_next_action(
         self,
